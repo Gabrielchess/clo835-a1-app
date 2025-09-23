@@ -2,47 +2,69 @@ name: Build & Push to ECR
 
 on:
   push:
-    branches: [ master ]   # change to [ main ] if your default branch is main
+    branches: [ master ]   # change to [ main ] if needed
+  workflow_dispatch:       # let you run it manually from Actions tab
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # harmless even if you use static keys
+      id-token: write
 
     env:
       AWS_REGION: us-east-1
       WEB_REPO: clo835-webapp
       MYSQL_REPO: clo835-mysql
       IMAGE_TAG: v0.1
+      SHA_TAG: ${{ github.sha }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-
-      # (Optional) Helps debug credentials quickly
-      - name: Who am I?
-        run: aws sts get-caller-identity || true
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}   # omit this line if you use permanent IAM keys
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Confirm identity
+        run: aws sts get-caller-identity
+
+      - name: Ensure ECR repositories exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          for REPO in "${WEB_REPO}" "${MYSQL_REPO}"; do
+            if ! aws ecr describe-repositories --repository-names "$REPO" >/dev/null 2>&1; then
+              echo "Creating ECR repo $REPO"
+              aws ecr create-repository --repository-name "$REPO" >/dev/null
+            else
+              echo "ECR repo $REPO already exists"
+            fi
+          done
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build & push web image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.WEB_REPO }}:${{ env.IMAGE_TAG }} -f Dockerfile .
-          docker push     ${{ steps.login-ecr.outputs.registry }}/${{ env.WEB_REPO }}:${{ env.IMAGE_TAG }}
+          set -e
+          docker build -t "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}" -t "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}" -f Dockerfile .
+          docker push "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}"
+          docker push "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}"
 
       - name: Build & push mysql image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.MYSQL_REPO }}:${{ env.IMAGE_TAG }} -f Dockerfile_mysql .
-          docker push     ${{ steps.login-ecr.outputs.registry }}/${{ env.MYSQL_REPO }}:${{ env.IMAGE_TAG }}
+          set -e
+          docker build -t "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}" -t "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}" -f Dockerfile_mysql .
+          docker push "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}"
+          docker push "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}"
