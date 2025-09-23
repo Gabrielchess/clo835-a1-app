@@ -2,8 +2,8 @@ name: Build & Push to ECR
 
 on:
   push:
-    branches: [ master ]
-  workflow_dispatch:
+    branches: [ master ]   # change to [ main ] if needed
+  workflow_dispatch:       # let you run it manually from Actions tab
 
 jobs:
   build:
@@ -16,23 +16,37 @@ jobs:
       AWS_REGION: us-east-1
       WEB_REPO: clo835-webapp
       MYSQL_REPO: clo835-mysql
-      IMAGE_TAG: v0.2
+      IMAGE_TAG: v0.1
       SHA_TAG: ${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (LabRole temp keys)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          # If your keys are temporary (from STS), also add:
+          # aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ env.AWS_REGION }}
 
       - name: Confirm identity
         run: aws sts get-caller-identity
+
+      - name: Ensure ECR repositories exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          for REPO in "${WEB_REPO}" "${MYSQL_REPO}"; do
+            if ! aws ecr describe-repositories --repository-names "$REPO" >/dev/null 2>&1; then
+              echo "Creating ECR repo $REPO"
+              aws ecr create-repository --repository-name "$REPO" >/dev/null
+            else
+              echo "ECR repo $REPO already exists"
+            fi
+          done
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -43,10 +57,7 @@ jobs:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -e
-          docker build --pull --no-cache \
-            -t "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}" \
-            -t "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}" \
-            -f Dockerfile .
+          docker build -t "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}" -t "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}" -f Dockerfile .
           docker push "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}"
           docker push "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}"
 
@@ -55,9 +66,6 @@ jobs:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -e
-          docker build --pull --no-cache \
-            -t "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}" \
-            -t "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}" \
-            -f Dockerfile_mysql .
+          docker build -t "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}" -t "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}" -f Dockerfile_mysql .
           docker push "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}"
           docker push "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}"
