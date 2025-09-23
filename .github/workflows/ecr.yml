@@ -27,7 +27,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/LabRole
+          role-to-assume: arn:aws:iam::905418146033:role/LabRole
           role-session-name: github-actions
 
       - name: Confirm identity
