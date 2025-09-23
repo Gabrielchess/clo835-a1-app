@@ -5,10 +5,6 @@ on:
     branches: [ master ]
   workflow_dispatch:
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,74 +16,48 @@ jobs:
       AWS_REGION: us-east-1
       WEB_REPO: clo835-webapp
       MYSQL_REPO: clo835-mysql
-      IMAGE_TAG: v0.1
+      IMAGE_TAG: v0.2
+      SHA_TAG: ${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Tooling versions
-        run: |
-          set -euxo pipefail
-          aws --version
-          docker --version
-          uname -a
-
-      # If you use long-lived access keys, OMIT aws-session-token entirely.
-      # If you use temporary creds, keep it and make sure the secret exists.
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (LabRole temp keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region:            ${{ env.AWS_REGION }}
-          aws-session-token:   ${{ secrets.AWS_SESSION_TOKEN }}   # <— only if you *really* have it
 
       - name: Confirm identity
-        run: |
-          set -euxo pipefail
-          aws sts get-caller-identity
-
-      - name: Ensure ECR repositories exist
-        run: |
-          set -euxo pipefail
-          for REPO in "${WEB_REPO}" "${MYSQL_REPO}"; do
-            aws ecr describe-repositories --repository-names "$REPO" >/dev/null 2>&1 || \
-              aws ecr create-repository --repository-name "$REPO" >/dev/null
-          done
+        run: aws sts get-caller-identity
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Compute short SHA tag
-        id: sha
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
-      - name: Build & push WEB image
+      - name: Build & push web image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          SHORT_SHA: ${{ steps.sha.outputs.SHORT_SHA }}
         run: |
-          set -euxo pipefail
-          test -f Dockerfile
-          docker build \
+          set -e
+          docker build --pull --no-cache \
             -t "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}" \
-            -t "${REGISTRY}/${WEB_REPO}:${SHORT_SHA}" \
+            -t "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}" \
             -f Dockerfile .
           docker push "${REGISTRY}/${WEB_REPO}:${IMAGE_TAG}"
-          docker push "${REGISTRY}/${WEB_REPO}:${SHORT_SHA}"
+          docker push "${REGISTRY}/${WEB_REPO}:${SHA_TAG::7}"
 
-      - name: Build & push MYSQL image
+      - name: Build & push mysql image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          SHORT_SHA: ${{ steps.sha.outputs.SHORT_SHA }}
         run: |
-          set -euxo pipefail
-          test -f Dockerfile_mysql
-          docker build \
+          set -e
+          docker build --pull --no-cache \
             -t "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}" \
-            -t "${REGISTRY}/${MYSQL_REPO}:${SHORT_SHA}" \
+            -t "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}" \
             -f Dockerfile_mysql .
           docker push "${REGISTRY}/${MYSQL_REPO}:${IMAGE_TAG}"
-          docker push "${REGISTRY}/${MYSQL_REPO}:${SHORT_SHA}"
+          docker push "${REGISTRY}/${MYSQL_REPO}:${SHA_TAG::7}"
