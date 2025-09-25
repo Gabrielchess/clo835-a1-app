@@ -1,4 +1,4 @@
-Hello World
+Hello WOrld
 
 # Install the required MySQL package
 
